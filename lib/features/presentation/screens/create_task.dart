@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:to_do_list/features/data/create_task_draft_storage.dart';
 import 'package:to_do_list/features/domain/entities/task_entity.dart';
 import 'package:to_do_list/features/presentation/bloc/task_bloc.dart';
 import 'package:to_do_list/features/presentation/bloc/task_event.dart';
@@ -19,7 +22,8 @@ class CreateTaskScreen extends StatefulWidget {
   State<CreateTaskScreen> createState() => _CreateTaskScreenState();
 }
 
-class _CreateTaskScreenState extends State<CreateTaskScreen> {
+class _CreateTaskScreenState extends State<CreateTaskScreen>
+    with WidgetsBindingObserver {
   /// Matches list UI / `PrioritySelector` order: TO-DO, IN-PROGRESS, COMPLETED.
   static const int _kStatusCompleted = 2;
 
@@ -30,6 +34,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _recurrenceController = TextEditingController();
+
+  /// After a successful create, avoid re-persisting form text from [dispose].
+  bool _suppressDraftPersistence = false;
 
   static int _optionIndex(int? value) {
     if (value == null) return 0;
@@ -56,6 +63,74 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       _currentPriorityIndex = 0;
       _currentStatusIndex = 0;
       _selectedDependencyIds = {};
+      WidgetsBinding.instance.addObserver(this);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _restoreDraftIfAny());
+    }
+  }
+
+  CreateTaskDraft _draftSnapshot() {
+    final deps = _dependencyListForSubmit();
+    return CreateTaskDraft(
+      name: _nameController.text,
+      description: _descriptionController.text,
+      dueMillis: _selectedDate.millisecondsSinceEpoch,
+      priorityIndex: _currentPriorityIndex,
+      statusIndex: _currentStatusIndex,
+      dependencyIds: deps,
+      recurrenceText: _recurrenceController.text,
+    );
+  }
+
+  bool _draftIsMeaningful(CreateTaskDraft d) {
+    if (d.name.trim().isNotEmpty || d.description.trim().isNotEmpty) {
+      return true;
+    }
+    if (d.recurrenceText.trim().isNotEmpty) return true;
+    if (d.dependencyIds.isNotEmpty) return true;
+    if (d.priorityIndex != 0 || d.statusIndex != 0) return true;
+    final today = DateTime.now();
+    final due = DateTime.fromMillisecondsSinceEpoch(d.dueMillis);
+    if (due.year != today.year ||
+        due.month != today.month ||
+        due.day != today.day) {
+      return true;
+    }
+    return false;
+  }
+
+  void _persistDraftOrClear() {
+    if (widget.isEditing || _suppressDraftPersistence) return;
+    final draft = _draftSnapshot();
+    if (_draftIsMeaningful(draft)) {
+      unawaited(CreateTaskDraftStorage.save(draft));
+    } else {
+      unawaited(CreateTaskDraftStorage.clear());
+    }
+  }
+
+  Future<void> _restoreDraftIfAny() async {
+    if (!mounted || widget.isEditing) return;
+    final draft = await CreateTaskDraftStorage.load();
+    if (!mounted || draft == null || !_draftIsMeaningful(draft)) return;
+    final validIds = context.read<TaskListBloc>().state.tasks.map((t) => t.id).toSet();
+    final deps = draft.dependencyIds.where(validIds.contains).toSet();
+    setState(() {
+      _nameController.text = draft.name;
+      _descriptionController.text = draft.description;
+      _selectedDate = DateTime.fromMillisecondsSinceEpoch(draft.dueMillis);
+      _currentPriorityIndex = draft.priorityIndex.clamp(0, 2);
+      _currentStatusIndex = draft.statusIndex.clamp(0, 2);
+      _selectedDependencyIds = deps;
+      _recurrenceController.text = draft.recurrenceText;
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (widget.isEditing) return;
+    if (state == AppLifecycleState.paused) {
+      _persistDraftOrClear();
     }
   }
 
@@ -104,13 +179,17 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
   @override
   void dispose() {
+    if (!widget.isEditing) {
+      WidgetsBinding.instance.removeObserver(this);
+      _persistDraftOrClear();
+    }
     _nameController.dispose();
     _descriptionController.dispose();
     _recurrenceController.dispose();
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final bloc = context.read<TaskListBloc>();
     final blocState = bloc.state;
     if (_currentStatusIndex == _kStatusCompleted &&
@@ -159,7 +238,10 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         recurrenceDays: recurrenceDays,
       );
       bloc.add(CreateTaskRequested(task));
+      _suppressDraftPersistence = true;
+      await CreateTaskDraftStorage.clear();
     }
+    if (!mounted) return;
     Navigator.pop(context);
   }
 
