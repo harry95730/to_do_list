@@ -33,7 +33,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Orchestrate'), findsOneWidget);
-    expect(find.text('All'), findsOneWidget);
-    expect(find.text('New task'), findsOneWidget);
+    expect(find.textContaining('All ('), findsOneWidget);
+    expect(find.byType(FloatingActionButton), findsOneWidget);
   });
 }

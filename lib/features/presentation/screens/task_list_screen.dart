@@ -8,6 +8,43 @@ import 'package:to_do_list/features/presentation/bloc/task_state.dart';
 import 'package:to_do_list/features/presentation/screens/create_task.dart';
 import 'package:to_do_list/theme.dart';
 
+List<InlineSpan> _highlightQueryInText(
+  String text,
+  String query,
+  TextStyle normalStyle,
+  TextStyle highlightStyle,
+) {
+  final trimmed = query.trim();
+  if (trimmed.isEmpty || text.isEmpty) {
+    return [TextSpan(text: text, style: normalStyle)];
+  }
+  final lowerText = text.toLowerCase();
+  final lowerQ = trimmed.toLowerCase();
+  final spans = <InlineSpan>[];
+  var start = 0;
+  final qLen = trimmed.length;
+  while (start <= text.length) {
+    final i = lowerText.indexOf(lowerQ, start);
+    if (i < 0) {
+      if (start < text.length) {
+        spans.add(TextSpan(text: text.substring(start), style: normalStyle));
+      }
+      break;
+    }
+    if (i > start) {
+      spans.add(TextSpan(text: text.substring(start, i), style: normalStyle));
+    }
+    final end = (i + qLen).clamp(0, text.length);
+    spans.add(
+      TextSpan(
+        text: text.substring(i, end),
+        style: highlightStyle,
+      ),
+    );
+    start = end;
+  }
+  return spans;
+}
 
 bool _taskBlockedByIncompleteDependencies(
   TaskEntity task,
@@ -22,8 +59,31 @@ bool _taskBlockedByIncompleteDependencies(
   return false;
 }
 
-class TaskListScreen extends StatelessWidget {
+class TaskListScreen extends StatefulWidget {
   const TaskListScreen({super.key});
+
+  @override
+  State<TaskListScreen> createState() => _TaskListScreenState();
+}
+
+class _TaskListScreenState extends State<TaskListScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  bool _searchActive = false;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  String get _searchQuery => _searchController.text;
+
+  void _closeSearch() {
+    setState(() {
+      _searchActive = false;
+      _searchController.clear();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,13 +92,58 @@ class TaskListScreen extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: OrchestrateTheme.primary,
-          title: Text(
-            "Orchestrate",
-            style: GoogleFonts.manrope(
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-            ),
-          ),
+          leading: _searchActive
+              ? IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: _closeSearch,
+                )
+              : null,
+          title: _searchActive
+              ? TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  style: GoogleFonts.manrope(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  cursorColor: Colors.white,
+                  decoration: InputDecoration(
+                    hintText: 'Search by task name…',
+                    hintStyle: GoogleFonts.manrope(
+                      color: Colors.white.withValues(alpha: 0.65),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                )
+              : Text(
+                  'Orchestrate',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+          actions: [
+            if (_searchActive)
+              IconButton(
+                icon: const Icon(Icons.clear, color: Colors.white),
+                onPressed: () {
+                  setState(() {
+                    _searchController.clear();
+                  });
+                },
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.search, color: Colors.white),
+                onPressed: () => setState(() => _searchActive = true),
+              ),
+          ],
         ),
         floatingActionButton: FloatingActionButton(
           onPressed: () {
@@ -54,10 +159,10 @@ class TaskListScreen extends StatelessWidget {
             Expanded(
               child: TabBarView(
                 children: [
-                  _TaskListView(filterStatus: null), // All
-                  _TaskListView(filterStatus: 0), // To-Do
-                  _TaskListView(filterStatus: 1), // In-Progress
-                  _TaskListView(filterStatus: 2), // Completed
+                  _TaskListView(filterStatus: null, searchQuery: _searchQuery),
+                  _TaskListView(filterStatus: 0, searchQuery: _searchQuery),
+                  _TaskListView(filterStatus: 1, searchQuery: _searchQuery),
+                  _TaskListView(filterStatus: 2, searchQuery: _searchQuery),
                 ],
               ),
             ),
@@ -71,43 +176,52 @@ class TaskListScreen extends StatelessWidget {
     return Container(
       color: OrchestrateTheme.primary,
       padding: const EdgeInsets.only(top: 8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-        decoration: const BoxDecoration(
-          color: OrchestrateTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: TabBar(
-          isScrollable: true,
-          tabAlignment: TabAlignment.center,
+      child: BlocBuilder<TaskListBloc, TaskListState>(
+        buildWhen: (prev, next) => prev.tasks != next.tasks,
+        builder: (context, state) {
+          final tasks = state.tasks;
+          final nAll = tasks.length;
+          final nTodo = tasks.where((t) => t.status == 0).length;
+          final nProgress = tasks.where((t) => t.status == 1).length;
+          final nDone = tasks.where((t) => t.status == 2).length;
 
-          indicatorColor: OrchestrateTheme.primary,
-
-          labelStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontSize: 16, // slightly bigger but still clean
-            color: Colors.white,
-          ),
-          unselectedLabelStyle: Theme.of(context).textTheme.titleMedium
-              ?.copyWith(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: OrchestrateTheme.onSurface.withValues(alpha: 0.6),
-              ),
-
-          labelColor: OrchestrateTheme.primary.withValues(alpha: 0.6),
-          unselectedLabelColor: OrchestrateTheme.onSurface.withValues(alpha: 0.6),
-
-          overlayColor: WidgetStateProperty.all(Colors.transparent),
-          dividerColor: Colors.transparent,
-          labelPadding: const EdgeInsets.symmetric(horizontal: 16),
-
-          tabs: const [
-            Tab(text: "All"),
-            Tab(text: "To-Do"),
-            Tab(text: "In Progress"),
-            Tab(text: "Completed"),
-          ],
-        ),
+          return Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            decoration: const BoxDecoration(
+              color: OrchestrateTheme.surface,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.center,
+              indicatorColor: OrchestrateTheme.primary,
+              labelStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 16,
+                    color: Colors.white,
+                  ),
+              unselectedLabelStyle: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: OrchestrateTheme.onSurface.withValues(alpha: 0.6),
+                  ),
+              labelColor: OrchestrateTheme.primary.withValues(alpha: 0.6),
+              unselectedLabelColor:
+                  OrchestrateTheme.onSurface.withValues(alpha: 0.6),
+              overlayColor: WidgetStateProperty.all(Colors.transparent),
+              dividerColor: Colors.transparent,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 16),
+              tabs: [
+                Tab(text: 'All ($nAll)'),
+                Tab(text: 'To-Do ($nTodo)'),
+                Tab(text: 'In Progress ($nProgress)'),
+                Tab(text: 'Completed ($nDone)'),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -115,7 +229,12 @@ class TaskListScreen extends StatelessWidget {
 
 class _TaskListView extends StatelessWidget {
   final int? filterStatus;
-  const _TaskListView({this.filterStatus});
+  final String searchQuery;
+
+  const _TaskListView({
+    this.filterStatus,
+    required this.searchQuery,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -125,9 +244,16 @@ class _TaskListView extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final filtered = filterStatus == null
+        var filtered = filterStatus == null
             ? state.tasks
             : state.tasks.where((t) => t.status == filterStatus).toList();
+
+        final q = searchQuery.trim().toLowerCase();
+        if (q.isNotEmpty) {
+          filtered = filtered
+              .where((t) => t.name.toLowerCase().contains(q))
+              .toList();
+        }
 
         final active = filtered.where((t) => t.dependencies.isEmpty).toList();
         final blocked = filtered
@@ -143,6 +269,7 @@ class _TaskListView extends StatelessWidget {
               iconColor: OrchestrateTheme.primary,
               tasks: active,
               allTasks: state.tasks,
+              searchQuery: searchQuery,
             ),
             const SizedBox(height: 16),
             _CollapsibleSection(
@@ -151,6 +278,7 @@ class _TaskListView extends StatelessWidget {
               iconColor: OrchestrateTheme.tertiary,
               tasks: blocked,
               allTasks: state.tasks,
+              searchQuery: searchQuery,
             ),
           ],
         );
@@ -165,6 +293,7 @@ class _CollapsibleSection extends StatelessWidget {
   final Color iconColor;
   final List<TaskEntity> tasks;
   final List<TaskEntity> allTasks;
+  final String searchQuery;
 
   const _CollapsibleSection({
     required this.title,
@@ -172,6 +301,7 @@ class _CollapsibleSection extends StatelessWidget {
     required this.iconColor,
     required this.tasks,
     required this.allTasks,
+    required this.searchQuery,
   });
 
   @override
@@ -186,7 +316,7 @@ class _CollapsibleSection extends StatelessWidget {
           onTap: () => context.read<TaskListBloc>().add(ToggleSection(title)),
           leading: Icon(icon, color: iconColor),
           title: Text(
-            title,
+            '$title (${tasks.length})',
             style: GoogleFonts.manrope(fontWeight: FontWeight.bold),
           ),
           trailing: AnimatedRotation(
@@ -202,7 +332,11 @@ class _CollapsibleSection extends StatelessWidget {
                 vertical: 8.0,
                 horizontal: 16,
               ),
-              child: _TaskCard(task: task, allTasks: allTasks),
+              child: _TaskCard(
+                task: task,
+                allTasks: allTasks,
+                searchQuery: searchQuery,
+              ),
             ),
           ),
       ],
@@ -250,8 +384,16 @@ class _TaskStatusBadge extends StatelessWidget {
 class _TaskCard extends StatelessWidget {
   final TaskEntity task;
   final List<TaskEntity> allTasks;
+  final String searchQuery;
 
-  const _TaskCard({required this.task, required this.allTasks});
+  const _TaskCard({
+    required this.task,
+    required this.allTasks,
+    required this.searchQuery,
+  });
+
+  static const Color _highlightBg = Color(0xFFFFF59D);
+  static const Color _highlightFg = Color(0xFF3E2723);
 
   @override
   Widget build(BuildContext context) {
@@ -263,6 +405,26 @@ class _TaskCard extends StatelessWidget {
     final Color priorityColor = isHigh
         ? OrchestrateTheme.tertiary
         : (task.priority == 1 ? Colors.orange : Colors.green);
+
+    final nameBaseStyle = GoogleFonts.manrope(
+      fontWeight: FontWeight.w800,
+      fontSize: 16,
+      color: const Color(0xFF191B23),
+    );
+    final nameHighlightStyle = nameBaseStyle.copyWith(
+      backgroundColor: _highlightBg,
+      color: _highlightFg,
+    );
+
+    final descBaseStyle = GoogleFonts.inter(
+      fontSize: 13,
+      color: const Color(0xFF434655),
+      height: 1.5,
+    );
+    final descHighlightStyle = descBaseStyle.copyWith(
+      backgroundColor: _highlightBg,
+      color: _highlightFg,
+    );
 
     final card = Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -303,13 +465,17 @@ class _TaskCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              task.name,
-                              style: GoogleFonts.manrope(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 16,
-                                color: const Color(0xFF191B23),
+                            Text.rich(
+                              TextSpan(
+                                children: _highlightQueryInText(
+                                  task.name,
+                                  searchQuery,
+                                  nameBaseStyle,
+                                  nameHighlightStyle,
+                                ),
                               ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
                             if (blocked) ...[
                               const SizedBox(height: 6),
@@ -330,12 +496,14 @@ class _TaskCard extends StatelessWidget {
                   ),
                   if (task.description.isNotEmpty) ...[
                     const SizedBox(height: 12),
-                    Text(
-                      task.description,
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        color: const Color(0xFF434655),
-                        height: 1.5,
+                    Text.rich(
+                      TextSpan(
+                        children: _highlightQueryInText(
+                          task.description,
+                          searchQuery,
+                          descBaseStyle,
+                          descHighlightStyle,
+                        ),
                       ),
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
