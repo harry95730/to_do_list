@@ -8,6 +8,20 @@ import 'package:to_do_list/features/presentation/bloc/task_state.dart';
 import 'package:to_do_list/features/presentation/screens/create_task.dart';
 import 'package:to_do_list/theme.dart';
 
+
+bool _taskBlockedByIncompleteDependencies(
+  TaskEntity task,
+  List<TaskEntity> allTasks,
+) {
+  if (task.dependencies.isEmpty) return false;
+  final byId = {for (final t in allTasks) t.id: t};
+  for (final id in task.dependencies) {
+    final dep = byId[id];
+    if (dep == null || dep.status != 2) return true;
+  }
+  return false;
+}
+
 class TaskListScreen extends StatelessWidget {
   const TaskListScreen({super.key});
 
@@ -128,6 +142,7 @@ class _TaskListView extends StatelessWidget {
               icon: Icons.bolt,
               iconColor: OrchestrateTheme.primary,
               tasks: active,
+              allTasks: state.tasks,
             ),
             const SizedBox(height: 16),
             _CollapsibleSection(
@@ -135,6 +150,7 @@ class _TaskListView extends StatelessWidget {
               icon: Icons.alt_route,
               iconColor: OrchestrateTheme.tertiary,
               tasks: blocked,
+              allTasks: state.tasks,
             ),
           ],
         );
@@ -148,12 +164,14 @@ class _CollapsibleSection extends StatelessWidget {
   final IconData icon;
   final Color iconColor;
   final List<TaskEntity> tasks;
+  final List<TaskEntity> allTasks;
 
   const _CollapsibleSection({
     required this.title,
     required this.icon,
     required this.iconColor,
     required this.tasks,
+    required this.allTasks,
   });
 
   @override
@@ -184,7 +202,7 @@ class _CollapsibleSection extends StatelessWidget {
                 vertical: 8.0,
                 horizontal: 16,
               ),
-              child: _TaskCard(task: task),
+              child: _TaskCard(task: task, allTasks: allTasks),
             ),
           ),
       ],
@@ -231,17 +249,22 @@ class _TaskStatusBadge extends StatelessWidget {
 
 class _TaskCard extends StatelessWidget {
   final TaskEntity task;
-  const _TaskCard({required this.task});
+  final List<TaskEntity> allTasks;
+
+  const _TaskCard({required this.task, required this.allTasks});
 
   @override
   Widget build(BuildContext context) {
+    final bool blocked =
+        _taskBlockedByIncompleteDependencies(task, allTasks);
+
     // Priority logic based on your Entity
     final bool isHigh = task.priority == 2;
     final Color priorityColor = isHigh
         ? OrchestrateTheme.tertiary
         : (task.priority == 1 ? Colors.orange : Colors.green);
 
-    return Padding(
+    final card = Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
         color: Colors.transparent,
@@ -288,6 +311,17 @@ class _TaskCard extends StatelessWidget {
                                 color: const Color(0xFF191B23),
                               ),
                             ),
+                            if (blocked) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                'Waiting on incomplete dependencies',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black45,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -326,6 +360,21 @@ class _TaskCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+
+    if (!blocked) return card;
+
+    return Opacity(
+      opacity: 0.48,
+      child: ColorFiltered(
+        colorFilter: const ColorFilter.matrix(<double>[
+          0.2126, 0.7152, 0.0722, 0, 0,
+          0.2126, 0.7152, 0.0722, 0, 0,
+          0.2126, 0.7152, 0.0722, 0, 0,
+          0, 0, 0, 1, 0,
+        ]),
+        child: card,
       ),
     );
   }
