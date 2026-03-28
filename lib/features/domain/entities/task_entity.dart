@@ -11,9 +11,8 @@ class TaskEntity extends Equatable {
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final String? createdBy;
-
-  /// Display order within the task’s group (active vs dependency). Lower = earlier.
   final int sortOrder;
+  final int? recurrenceDays;
 
   const TaskEntity({
     required this.id,
@@ -27,6 +26,7 @@ class TaskEntity extends Equatable {
     required this.updatedAt,
     required this.createdBy,
     this.sortOrder = 0,
+    this.recurrenceDays,
   });
 
   @override
@@ -42,6 +42,7 @@ class TaskEntity extends Equatable {
     updatedAt,
     createdBy,
     sortOrder,
+    recurrenceDays,
   ];
 
   TaskEntity copyWith({
@@ -56,6 +57,7 @@ class TaskEntity extends Equatable {
     DateTime? updatedAt,
     String? createdBy,
     int? sortOrder,
+    int? recurrenceDays,
   }) {
     return TaskEntity(
       id: id ?? this.id,
@@ -69,6 +71,7 @@ class TaskEntity extends Equatable {
       updatedAt: updatedAt ?? this.updatedAt,
       createdBy: createdBy ?? this.createdBy,
       sortOrder: sortOrder ?? this.sortOrder,
+      recurrenceDays: recurrenceDays ?? this.recurrenceDays,
     );
   }
 
@@ -84,6 +87,7 @@ class TaskEntity extends Equatable {
     'updatedAt': updatedAt?.toIso8601String(),
     'createdBy': createdBy,
     'sortOrder': sortOrder,
+    'recurrenceDays': recurrenceDays,
   };
 
   factory TaskEntity.fromJson(Map<String, dynamic> json) {
@@ -109,6 +113,7 @@ class TaskEntity extends Equatable {
           : null,
       createdBy: json['createdBy'] as String?,
       sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 0,
+      recurrenceDays: (json['recurrenceDays'] as num?)?.toInt(),
     );
   }
 }

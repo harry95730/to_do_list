@@ -67,6 +67,10 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
 
     try {
       await _addTask(event.task);
+      await _maybeSpawnRecurringFollowUp(
+        savedTask: event.task,
+        previousVersion: null,
+      );
       emit(state.copyWith(status: TaskListStatus.success));
     } catch (_) {
       emit(state.copyWith(status: TaskListStatus.failure));
@@ -78,10 +82,47 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
     Emitter<TaskListState> emit,
   ) async {
     try {
+      final matches = state.tasks.where((t) => t.id == event.task.id);
+      final TaskEntity? prior = matches.isEmpty ? null : matches.first;
       await _updateTask(event.task);
+      await _maybeSpawnRecurringFollowUp(
+        savedTask: event.task,
+        previousVersion: prior,
+      );
     } catch (_) {
       emit(state.copyWith(status: TaskListStatus.failure));
     }
+  }
+
+  Future<void> _maybeSpawnRecurringFollowUp({
+    required TaskEntity savedTask,
+    required TaskEntity? previousVersion,
+  }) async {
+    final n = savedTask.recurrenceDays;
+    if (n == null || n <= 0) return;
+    final becameCompleted =
+        savedTask.status == 2 &&
+        (previousVersion == null || previousVersion.status != 2);
+    if (!becameCompleted) return;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final nextDue = today.add(Duration(days: n));
+
+    final followUp = TaskEntity(
+      id: '${now.microsecondsSinceEpoch}_${savedTask.id}',
+      name: savedTask.name,
+      description: savedTask.description,
+      dueDate: nextDue,
+      priority: savedTask.priority,
+      status: 0,
+      dependencies: List<String>.from(savedTask.dependencies),
+      recurrenceDays: savedTask.recurrenceDays,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      createdBy: savedTask.createdBy,
+    );
+    await _addTask(followUp);
   }
 
   Future<void> _onDeleteTaskRequested(

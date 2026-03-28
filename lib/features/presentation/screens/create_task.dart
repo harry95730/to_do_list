@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:to_do_list/features/domain/entities/task_entity.dart';
@@ -28,6 +29,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   late Set<String> _selectedDependencyIds;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
+  final TextEditingController _recurrenceController = TextEditingController();
 
   static int _optionIndex(int? value) {
     if (value == null) return 0;
@@ -45,12 +47,24 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       _currentPriorityIndex = _optionIndex(existing.priority);
       _currentStatusIndex = _optionIndex(existing.status);
       _selectedDependencyIds = Set<String>.from(existing.dependencies);
+      final r = existing.recurrenceDays;
+      if (r != null && r > 0) {
+        _recurrenceController.text = r.toString();
+      }
     } else {
       _selectedDate = DateTime.now();
       _currentPriorityIndex = 0;
       _currentStatusIndex = 0;
       _selectedDependencyIds = {};
     }
+  }
+
+  int? _parseRecurrenceDays() {
+    final t = _recurrenceController.text.trim();
+    if (t.isEmpty) return null;
+    final v = int.tryParse(t);
+    if (v == null || v <= 0) return null;
+    return v;
   }
 
   List<String> _dependencyListForSubmit() {
@@ -92,6 +106,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   void dispose() {
     _nameController.dispose();
     _descriptionController.dispose();
+    _recurrenceController.dispose();
     super.dispose();
   }
 
@@ -110,6 +125,8 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       return;
     }
 
+    final recurrenceDays = _parseRecurrenceDays();
+
     if (widget.isEditing) {
       final existing = widget.taskToEdit!;
       final task = TaskEntity(
@@ -124,6 +141,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         updatedAt: DateTime.now(),
         createdBy: existing.createdBy,
         sortOrder: existing.sortOrder,
+        recurrenceDays: recurrenceDays,
       );
       bloc.add(UpdateTaskRequested(task));
     } else {
@@ -138,6 +156,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
         createdBy: "Harry Asher",
+        recurrenceDays: recurrenceDays,
       );
       bloc.add(CreateTaskRequested(task));
     }
@@ -509,6 +528,37 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                         _currentPriorityIndex = index;
                       });
                     },
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    "RECURRENCE (EVERY N DAYS)",
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _recurrenceController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                    decoration: InputDecoration(
+                      hintText: "e.g., 7 — leave empty for no repeat",
+                      filled: true,
+                      fillColor: OrchestrateTheme.surfaceContainerHigh,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "When you mark this task completed, a new copy is created "
+                    "with the same details and a due date of today plus this many days.",
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.black54,
+                          height: 1.35,
+                        ),
                   ),
                 ],
               ),
