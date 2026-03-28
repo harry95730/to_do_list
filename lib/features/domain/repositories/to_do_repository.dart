@@ -5,4 +5,8 @@ abstract class ToDoRepository {
   Stream<List<TaskEntity>> watchTasks();
   Future<void> addTask(TaskEntity task);
   Future<void> updateTask(TaskEntity task);
+
+  Future<void> reorderActiveTasks(List<String> orderedIds);
+
+  Future<void> reorderDependencyTasks(List<String> orderedIds);
 }

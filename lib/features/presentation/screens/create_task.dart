@@ -123,6 +123,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         createdAt: existing.createdAt,
         updatedAt: DateTime.now(),
         createdBy: existing.createdBy,
+        sortOrder: existing.sortOrder,
       );
       bloc.add(UpdateTaskRequested(task));
     } else {
@@ -290,9 +291,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       buildWhen: (prev, next) => prev.tasks != next.tasks,
       builder: (context, state) {
         final selfId = widget.taskToEdit?.id;
-        final candidates = state.tasks
-            .where((t) => t.id != selfId)
-            .toList();
+        final candidates = state.tasks.where((t) => t.id != selfId).toList();
 
         return Card(
           color: Colors.white,
@@ -307,7 +306,10 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.alt_route, color: OrchestrateTheme.tertiary),
+                    const Icon(
+                      Icons.alt_route,
+                      color: OrchestrateTheme.tertiary,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       "Dependencies",
@@ -318,9 +320,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                 const SizedBox(height: 8),
                 Text(
                   "Select tasks that must be done before this one.",
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.black54,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.black54),
                 ),
                 const SizedBox(height: 16),
                 if (candidates.isEmpty)
@@ -438,8 +440,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                         builder: (context, child) {
                           return Theme(
                             data: Theme.of(context).copyWith(
-                              colorScheme: Theme.of(context)
-                                  .colorScheme
+                              colorScheme: Theme.of(context).colorScheme
                                   .copyWith(
                                     primary: OrchestrateTheme.primary,
                                     onPrimary: Colors.white,
@@ -485,7 +486,10 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                     selectedIndex: _currentStatusIndex,
                     options: const [
                       PriorityOption(label: "TO-DO", color: Colors.red),
-                      PriorityOption(label: "IN-PROGRESS", color: Colors.orange),
+                      PriorityOption(
+                        label: "IN-PROGRESS",
+                        color: Colors.orange,
+                      ),
                       PriorityOption(label: "COMPLETED", color: Colors.green),
                     ],
                     onChanged: (index) =>

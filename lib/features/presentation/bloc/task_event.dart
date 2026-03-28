@@ -31,3 +31,19 @@ class UpdateTaskRequested extends TaskListEvent {
   @override
   List<Object?> get props => [task];
 }
+
+class ReorderActiveTasksRequested extends TaskListEvent {
+  final List<String> orderedIds;
+  const ReorderActiveTasksRequested(this.orderedIds);
+
+  @override
+  List<Object?> get props => [orderedIds];
+}
+
+class ReorderDependencyTasksRequested extends TaskListEvent {
+  final List<String> orderedIds;
+  const ReorderDependencyTasksRequested(this.orderedIds);
+
+  @override
+  List<Object?> get props => [orderedIds];
+}

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +8,18 @@ import 'package:to_do_list/features/presentation/bloc/task_event.dart';
 import 'package:to_do_list/features/presentation/bloc/task_state.dart';
 import 'package:to_do_list/features/presentation/screens/create_task.dart';
 import 'package:to_do_list/theme.dart';
+
+/// Pointer-down drag (web/desktop) avoids parent [ListView] stealing vertical drags.
+bool _useImmediateReorderDrag() {
+  if (kIsWeb) return true;
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.windows ||
+    TargetPlatform.linux ||
+    TargetPlatform.macOS =>
+      true,
+    _ => false,
+  };
+}
 
 List<InlineSpan> _highlightQueryInText(
   String text,
@@ -35,15 +48,56 @@ List<InlineSpan> _highlightQueryInText(
       spans.add(TextSpan(text: text.substring(start, i), style: normalStyle));
     }
     final end = (i + qLen).clamp(0, text.length);
-    spans.add(
-      TextSpan(
-        text: text.substring(i, end),
-        style: highlightStyle,
-      ),
-    );
+    spans.add(TextSpan(text: text.substring(i, end), style: highlightStyle));
     start = end;
   }
   return spans;
+}
+
+int _taskDisplayCompare(TaskEntity a, TaskEntity b) {
+  final c = a.sortOrder.compareTo(b.sortOrder);
+  return c != 0 ? c : a.id.compareTo(b.id);
+}
+
+List<String> _fullSectionOrderedIds(
+  List<TaskEntity> allTasks,
+  bool isDependencySection,
+) {
+  final part = allTasks
+      .where(
+        (t) => isDependencySection
+            ? t.dependencies.isNotEmpty
+            : t.dependencies.isEmpty,
+      )
+      .toList();
+  part.sort(_taskDisplayCompare);
+  return part.map((t) => t.id).toList();
+}
+
+/// Merges a reordered visible subset back into the full section order so tasks
+/// hidden by the status tab keep a stable position relative to the block.
+List<String> _mergeSectionReorder({
+  required List<String> fullOrderedIds,
+  required List<String> reorderedVisibleIds,
+  required Set<String> visibleIdSet,
+}) {
+  if (reorderedVisibleIds.isEmpty) {
+    return List<String>.from(fullOrderedIds);
+  }
+  if (visibleIdSet.length == fullOrderedIds.length &&
+      visibleIdSet.length == reorderedVisibleIds.length) {
+    return List<String>.from(reorderedVisibleIds);
+  }
+  final firstIdx = fullOrderedIds.indexWhere(visibleIdSet.contains);
+  if (firstIdx < 0) return List<String>.from(fullOrderedIds);
+
+  final prefix = fullOrderedIds.sublist(0, firstIdx);
+  final afterFirst = fullOrderedIds.sublist(firstIdx);
+  final tailHidden = <String>[
+    for (final id in afterFirst)
+      if (!visibleIdSet.contains(id)) id,
+  ];
+  return [...prefix, ...reorderedVisibleIds, ...tailHidden];
 }
 
 bool _taskBlockedByIncompleteDependencies(
@@ -196,20 +250,19 @@ class _TaskListScreenState extends State<TaskListScreen> {
               tabAlignment: TabAlignment.center,
               indicatorColor: OrchestrateTheme.primary,
               labelStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontSize: 16,
-                    color: Colors.white,
-                  ),
-              unselectedLabelStyle: Theme.of(context)
-                  .textTheme
-                  .titleMedium
+                fontSize: 16,
+                color: Colors.white,
+              ),
+              unselectedLabelStyle: Theme.of(context).textTheme.titleMedium
                   ?.copyWith(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                     color: OrchestrateTheme.onSurface.withValues(alpha: 0.6),
                   ),
               labelColor: OrchestrateTheme.primary.withValues(alpha: 0.6),
-              unselectedLabelColor:
-                  OrchestrateTheme.onSurface.withValues(alpha: 0.6),
+              unselectedLabelColor: OrchestrateTheme.onSurface.withValues(
+                alpha: 0.6,
+              ),
               overlayColor: WidgetStateProperty.all(Colors.transparent),
               dividerColor: Colors.transparent,
               labelPadding: const EdgeInsets.symmetric(horizontal: 16),
@@ -231,10 +284,7 @@ class _TaskListView extends StatelessWidget {
   final int? filterStatus;
   final String searchQuery;
 
-  const _TaskListView({
-    this.filterStatus,
-    required this.searchQuery,
-  });
+  const _TaskListView({this.filterStatus, required this.searchQuery});
 
   @override
   Widget build(BuildContext context) {
@@ -255,12 +305,17 @@ class _TaskListView extends StatelessWidget {
               .toList();
         }
 
-        final active = filtered.where((t) => t.dependencies.isEmpty).toList();
-        final blocked = filtered
+        final ordered = List<TaskEntity>.from(filtered)..sort(_taskDisplayCompare);
+
+        final active = ordered.where((t) => t.dependencies.isEmpty).toList();
+        final blocked = ordered
             .where((t) => t.dependencies.isNotEmpty)
             .toList();
 
+        final reorderable = q.isEmpty;
+
         return ListView(
+          primary: false,
           padding: const EdgeInsets.all(20),
           children: [
             _CollapsibleSection(
@@ -270,6 +325,8 @@ class _TaskListView extends StatelessWidget {
               tasks: active,
               allTasks: state.tasks,
               searchQuery: searchQuery,
+              reorderable: reorderable,
+              isDependencySection: false,
             ),
             const SizedBox(height: 16),
             _CollapsibleSection(
@@ -279,6 +336,8 @@ class _TaskListView extends StatelessWidget {
               tasks: blocked,
               allTasks: state.tasks,
               searchQuery: searchQuery,
+              reorderable: reorderable,
+              isDependencySection: true,
             ),
           ],
         );
@@ -294,6 +353,8 @@ class _CollapsibleSection extends StatelessWidget {
   final List<TaskEntity> tasks;
   final List<TaskEntity> allTasks;
   final String searchQuery;
+  final bool reorderable;
+  final bool isDependencySection;
 
   const _CollapsibleSection({
     required this.title,
@@ -302,6 +363,8 @@ class _CollapsibleSection extends StatelessWidget {
     required this.tasks,
     required this.allTasks,
     required this.searchQuery,
+    required this.reorderable,
+    required this.isDependencySection,
   });
 
   @override
@@ -326,20 +389,115 @@ class _CollapsibleSection extends StatelessWidget {
           ),
         ),
         if (isExpanded)
-          ...tasks.map(
-            (task) => Padding(
-              padding: const EdgeInsets.symmetric(
-                vertical: 8.0,
-                horizontal: 16,
-              ),
-              child: _TaskCard(
-                task: task,
-                allTasks: allTasks,
-                searchQuery: searchQuery,
-              ),
-            ),
-          ),
+          reorderable && tasks.isNotEmpty
+              ? _ReorderableTaskList(
+                  tasks: tasks,
+                  allTasks: allTasks,
+                  searchQuery: searchQuery,
+                  isDependencySection: isDependencySection,
+                )
+              : Column(
+                  children: [
+                    for (final task in tasks)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 8.0,
+                          horizontal: 16,
+                        ),
+                        child: _TaskCard(
+                          task: task,
+                          allTasks: allTasks,
+                          searchQuery: searchQuery,
+                        ),
+                      ),
+                  ],
+                ),
       ],
+    );
+  }
+}
+
+class _ReorderableTaskList extends StatelessWidget {
+  final List<TaskEntity> tasks;
+  final List<TaskEntity> allTasks;
+  final String searchQuery;
+  final bool isDependencySection;
+
+  const _ReorderableTaskList({
+    required this.tasks,
+    required this.allTasks,
+    required this.searchQuery,
+    required this.isDependencySection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ReorderableListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      buildDefaultDragHandles: false,
+      proxyDecorator: (child, index, animation) {
+        return AnimatedBuilder(
+          animation: animation,
+          builder: (context, c) {
+            final t = CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeInOut,
+            );
+            return Transform.scale(
+              scale: 1.0 + 0.02 * t.value,
+              child: Material(
+                elevation: 6 * t.value,
+                borderRadius: BorderRadius.circular(16),
+                color: Colors.transparent,
+                child: c,
+              ),
+            );
+          },
+          child: child,
+        );
+      },
+      itemCount: tasks.length,
+      onReorder: (oldIndex, newIndex) {
+        var n = newIndex;
+        if (n > oldIndex) n -= 1;
+        final visibleSet = tasks.map((t) => t.id).toSet();
+        final ids = tasks.map((t) => t.id).toList();
+        final moved = ids.removeAt(oldIndex);
+        ids.insert(n, moved);
+        final fullIds = _fullSectionOrderedIds(allTasks, isDependencySection);
+        final merged = _mergeSectionReorder(
+          fullOrderedIds: fullIds,
+          reorderedVisibleIds: ids,
+          visibleIdSet: visibleSet,
+        );
+        final bloc = context.read<TaskListBloc>();
+        if (isDependencySection) {
+          bloc.add(ReorderDependencyTasksRequested(merged));
+        } else {
+          bloc.add(ReorderActiveTasksRequested(merged));
+        }
+      },
+      itemBuilder: (context, index) {
+        final task = tasks[index];
+        final card = MouseRegion(
+          cursor: SystemMouseCursors.grab,
+          child: _TaskCard(
+            task: task,
+            allTasks: allTasks,
+            searchQuery: searchQuery,
+            inReorderList: true,
+          ),
+        );
+        final dragWrapper = _useImmediateReorderDrag()
+            ? ReorderableDragStartListener(index: index, child: card)
+            : ReorderableDelayedDragStartListener(index: index, child: card);
+        return Padding(
+          key: ValueKey(task.id),
+          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16),
+          child: dragWrapper,
+        );
+      },
     );
   }
 }
@@ -385,11 +543,14 @@ class _TaskCard extends StatelessWidget {
   final TaskEntity task;
   final List<TaskEntity> allTasks;
   final String searchQuery;
+  /// Avoids [InkWell] winning the gesture arena over reorder long-press / drag.
+  final bool inReorderList;
 
   const _TaskCard({
     required this.task,
     required this.allTasks,
     required this.searchQuery,
+    this.inReorderList = false,
   });
 
   static const Color _highlightBg = Color(0xFFFFF59D);
@@ -397,8 +558,7 @@ class _TaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool blocked =
-        _taskBlockedByIncompleteDependencies(task, allTasks);
+    final bool blocked = _taskBlockedByIncompleteDependencies(task, allTasks);
 
     // Priority logic based on your Entity
     final bool isHigh = task.priority == 2;
@@ -426,108 +586,121 @@ class _TaskCard extends StatelessWidget {
       color: _highlightFg,
     );
 
+    void openEditor() {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => CreateTaskScreen(taskToEdit: task),
+        ),
+      );
+    }
+
+    final borderRadius = BorderRadius.circular(16);
+    final inkChild = Ink(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: borderRadius,
+        border: Border(left: BorderSide(color: priorityColor, width: 4)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text.rich(
+                        TextSpan(
+                          children: _highlightQueryInText(
+                            task.name,
+                            searchQuery,
+                            nameBaseStyle,
+                            nameHighlightStyle,
+                          ),
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (blocked) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Waiting on incomplete dependencies',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black45,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                _TaskStatusBadge(status: task.status),
+              ],
+            ),
+            if (task.description.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text.rich(
+                TextSpan(
+                  children: _highlightQueryInText(
+                    task.description,
+                    searchQuery,
+                    descBaseStyle,
+                    descHighlightStyle,
+                  ),
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            const SizedBox(height: 16),
+            const Divider(height: 1, color: Color(0xFFF1F1F9)),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const CircleAvatar(
+                  radius: 12,
+                  backgroundColor: Color(0xFFEDEDF9),
+                  child: Icon(Icons.person, size: 14, color: Colors.grey),
+                ),
+                _buildDateInfo(task.dueDate),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+
     final card = Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
         color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => CreateTaskScreen(taskToEdit: task),
+        borderRadius: borderRadius,
+        clipBehavior: Clip.antiAlias,
+        child: inReorderList
+            ? GestureDetector(
+                onTap: openEditor,
+                behavior: HitTestBehavior.opaque,
+                child: inkChild,
+              )
+            : InkWell(
+                onTap: openEditor,
+                borderRadius: borderRadius,
+                child: inkChild,
               ),
-            );
-          },
-          borderRadius: BorderRadius.circular(16),
-          child: Ink(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border(left: BorderSide(color: priorityColor, width: 4)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text.rich(
-                              TextSpan(
-                                children: _highlightQueryInText(
-                                  task.name,
-                                  searchQuery,
-                                  nameBaseStyle,
-                                  nameHighlightStyle,
-                                ),
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            if (blocked) ...[
-                              const SizedBox(height: 6),
-                              Text(
-                                'Waiting on incomplete dependencies',
-                                style: GoogleFonts.inter(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black45,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      _TaskStatusBadge(status: task.status),
-                    ],
-                  ),
-                  if (task.description.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text.rich(
-                      TextSpan(
-                        children: _highlightQueryInText(
-                          task.description,
-                          searchQuery,
-                          descBaseStyle,
-                          descHighlightStyle,
-                        ),
-                      ),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  const Divider(height: 1, color: Color(0xFFF1F1F9)),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const CircleAvatar(
-                        radius: 12,
-                        backgroundColor: Color(0xFFEDEDF9),
-                        child: Icon(Icons.person, size: 14, color: Colors.grey),
-                      ),
-                      _buildDateInfo(task.dueDate),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
 
@@ -537,10 +710,26 @@ class _TaskCard extends StatelessWidget {
       opacity: 0.48,
       child: ColorFiltered(
         colorFilter: const ColorFilter.matrix(<double>[
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0, 0, 0, 1, 0,
+          0.2126,
+          0.7152,
+          0.0722,
+          0,
+          0,
+          0.2126,
+          0.7152,
+          0.0722,
+          0,
+          0,
+          0.2126,
+          0.7152,
+          0.0722,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
         ]),
         child: card,
       ),

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:to_do_list/features/domain/entities/task_entity.dart';
 import 'package:to_do_list/features/domain/usecases/add_task_usecase.dart';
+import 'package:to_do_list/features/domain/usecases/reorder_active_tasks_usecase.dart';
+import 'package:to_do_list/features/domain/usecases/reorder_dependency_tasks_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/update_task_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/watch_task_usecase.dart';
 import 'package:to_do_list/features/presentation/bloc/task_event.dart';
@@ -12,21 +14,29 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
   final WatchTask _watchTasks;
   final AddTask _addTask;
   final UpdateTask _updateTask;
+  final ReorderActiveTasks _reorderActive;
+  final ReorderDependencyTasks _reorderDependencies;
   StreamSubscription<List<TaskEntity>>? _tasksSubscription;
 
   TaskListBloc({
     required WatchTask watchTasks,
     required AddTask addTask,
     required UpdateTask updateTask,
+    required ReorderActiveTasks reorderActive,
+    required ReorderDependencyTasks reorderDependencies,
   }) : _watchTasks = watchTasks,
        _addTask = addTask,
        _updateTask = updateTask,
+       _reorderActive = reorderActive,
+       _reorderDependencies = reorderDependencies,
        super(const TaskListState()) {
     on<WatchTasksStarted>(_onWatchTasksStarted);
     on<_TasksReceived>(_onTasksReceived);
     on<ToggleSection>(_onToggleSection);
     on<CreateTaskRequested>(_onCreateTaskRequested);
     on<UpdateTaskRequested>(_onUpdateTaskRequested);
+    on<ReorderActiveTasksRequested>(_onReorderActiveTasksRequested);
+    on<ReorderDependencyTasksRequested>(_onReorderDependencyTasksRequested);
   }
 
   Future<void> _onWatchTasksStarted(
@@ -77,6 +87,28 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
       newExpanded.add(event.sectionTitle);
     }
     emit(state.copyWith(expandedSections: newExpanded));
+  }
+
+  Future<void> _onReorderActiveTasksRequested(
+    ReorderActiveTasksRequested event,
+    Emitter<TaskListState> emit,
+  ) async {
+    try {
+      await _reorderActive(event.orderedIds);
+    } catch (_) {
+      emit(state.copyWith(status: TaskListStatus.failure));
+    }
+  }
+
+  Future<void> _onReorderDependencyTasksRequested(
+    ReorderDependencyTasksRequested event,
+    Emitter<TaskListState> emit,
+  ) async {
+    try {
+      await _reorderDependencies(event.orderedIds);
+    } catch (_) {
+      emit(state.copyWith(status: TaskListStatus.failure));
+    }
   }
 
   @override
