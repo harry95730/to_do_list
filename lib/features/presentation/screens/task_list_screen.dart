@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -9,16 +9,43 @@ import 'package:to_do_list/features/presentation/bloc/task_state.dart';
 import 'package:to_do_list/features/presentation/screens/create_task.dart';
 import 'package:to_do_list/theme.dart';
 
-/// Pointer-down drag (web/desktop) avoids parent [ListView] stealing vertical drags.
-bool _useImmediateReorderDrag() {
-  if (kIsWeb) return true;
-  return switch (defaultTargetPlatform) {
-    TargetPlatform.windows ||
-    TargetPlatform.linux ||
-    TargetPlatform.macOS =>
-      true,
-    _ => false,
-  };
+/// Same role as [ReorderableDragStartListener], but uses
+/// [VerticalMultiDragGestureRecognizer] so horizontal swipes can go to
+/// [Dismissible] while **vertical** drags still join the gesture arena on
+/// pointer down (deferred registration loses to the parent [ListView]).
+class _VerticalReorderDragStartListener extends StatelessWidget {
+  const _VerticalReorderDragStartListener({
+    required this.index,
+    required this.child,
+  });
+
+  final int index;
+  final Widget child;
+
+  void _startDragging(BuildContext context, PointerDownEvent event) {
+    final list = SliverReorderableList.maybeOf(context);
+    final settings = MediaQuery.maybeGestureSettingsOf(context);
+    final recognizer = VerticalMultiDragGestureRecognizer()
+      ..gestureSettings = settings;
+    if (list != null) {
+      list.startItemDragReorder(
+        index: index,
+        event: event,
+        recognizer: recognizer,
+      );
+    } else {
+      recognizer.dispose();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (event) => _startDragging(context, event),
+      child: child,
+    );
+  }
 }
 
 List<InlineSpan> _highlightQueryInText(
@@ -74,8 +101,52 @@ List<String> _fullSectionOrderedIds(
   return part.map((t) => t.id).toList();
 }
 
-/// Merges a reordered visible subset back into the full section order so tasks
-/// hidden by the status tab keep a stable position relative to the block.
+Future<bool> _confirmTaskDeleteDialog(BuildContext context) async {
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (ctx) {
+      return AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Delete Task',
+          style: GoogleFonts.manrope(fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'Are you sure you want to delete this task? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: OrchestrateTheme.tertiary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      );
+    },
+  );
+  return result ?? false;
+}
+
+Widget _taskDeleteSwipeBackground() {
+  return Container(
+    margin: const EdgeInsets.only(bottom: 12),
+    decoration: BoxDecoration(
+      color: OrchestrateTheme.tertiary,
+      borderRadius: BorderRadius.circular(16),
+    ),
+    alignment: Alignment.centerRight,
+    padding: const EdgeInsets.symmetric(horizontal: 24),
+    child: const Icon(Icons.delete_outline, color: Colors.white, size: 28),
+  );
+}
+
 List<String> _mergeSectionReorder({
   required List<String> fullOrderedIds,
   required List<String> reorderedVisibleIds,
@@ -305,7 +376,8 @@ class _TaskListView extends StatelessWidget {
               .toList();
         }
 
-        final ordered = List<TaskEntity>.from(filtered)..sort(_taskDisplayCompare);
+        final ordered = List<TaskEntity>.from(filtered)
+          ..sort(_taskDisplayCompare);
 
         final active = ordered.where((t) => t.dependencies.isEmpty).toList();
         final blocked = ordered
@@ -399,15 +471,27 @@ class _CollapsibleSection extends StatelessWidget {
               : Column(
                   children: [
                     for (final task in tasks)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 8.0,
-                          horizontal: 16,
-                        ),
-                        child: _TaskCard(
-                          task: task,
-                          allTasks: allTasks,
-                          searchQuery: searchQuery,
+                      Dismissible(
+                        key: ValueKey(task.id),
+                        direction: DismissDirection.endToStart,
+                        confirmDismiss: (_) async =>
+                            _confirmTaskDeleteDialog(context),
+                        onDismissed: (_) {
+                          context.read<TaskListBloc>().add(
+                                DeleteTaskRequested(task.id),
+                              );
+                        },
+                        background: _taskDeleteSwipeBackground(),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 8.0,
+                            horizontal: 16,
+                          ),
+                          child: _TaskCard(
+                            task: task,
+                            allTasks: allTasks,
+                            searchQuery: searchQuery,
+                          ),
                         ),
                       ),
                   ],
@@ -480,22 +564,29 @@ class _ReorderableTaskList extends StatelessWidget {
       },
       itemBuilder: (context, index) {
         final task = tasks[index];
-        final card = MouseRegion(
-          cursor: SystemMouseCursors.grab,
-          child: _TaskCard(
-            task: task,
-            allTasks: allTasks,
-            searchQuery: searchQuery,
-            inReorderList: true,
-          ),
-        );
-        final dragWrapper = _useImmediateReorderDrag()
-            ? ReorderableDragStartListener(index: index, child: card)
-            : ReorderableDelayedDragStartListener(index: index, child: card);
-        return Padding(
+        return Dismissible(
           key: ValueKey(task.id),
-          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16),
-          child: dragWrapper,
+          direction: DismissDirection.endToStart,
+          confirmDismiss: (_) async => _confirmTaskDeleteDialog(context),
+          onDismissed: (_) {
+            context.read<TaskListBloc>().add(DeleteTaskRequested(task.id));
+          },
+          background: _taskDeleteSwipeBackground(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16),
+            child: _VerticalReorderDragStartListener(
+              index: index,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.grab,
+                child: _TaskCard(
+                  task: task,
+                  allTasks: allTasks,
+                  searchQuery: searchQuery,
+                  inReorderList: true,
+                ),
+              ),
+            ),
+          ),
         );
       },
     );
@@ -543,7 +634,6 @@ class _TaskCard extends StatelessWidget {
   final TaskEntity task;
   final List<TaskEntity> allTasks;
   final String searchQuery;
-  /// Avoids [InkWell] winning the gesture arena over reorder long-press / drag.
   final bool inReorderList;
 
   const _TaskCard({
@@ -560,7 +650,6 @@ class _TaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool blocked = _taskBlockedByIncompleteDependencies(task, allTasks);
 
-    // Priority logic based on your Entity
     final bool isHigh = task.priority == 2;
     final Color priorityColor = isHigh
         ? OrchestrateTheme.tertiary

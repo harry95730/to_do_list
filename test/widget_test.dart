@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:to_do_list/features/data/repositories/persisting_to_do_repository.dart';
 import 'package:to_do_list/features/domain/usecases/add_task_usecase.dart';
+import 'package:to_do_list/features/domain/usecases/delete_task_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/reorder_active_tasks_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/reorder_dependency_tasks_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/update_task_usecase.dart';
@@ -28,6 +29,7 @@ void main() {
           watchTasks: WatchTask(repository),
           addTask: AddTask(repository),
           updateTask: UpdateTask(repository),
+          deleteTask: DeleteTask(repository),
           reorderActive: ReorderActiveTasks(repository),
           reorderDependencies: ReorderDependencyTasks(repository),
         )..add(WatchTasksStarted()),

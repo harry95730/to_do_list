@@ -96,6 +96,13 @@ class PersistingToDoRepository implements ToDoRepository {
   }
 
   @override
+  Future<void> deleteTask(String taskId) async {
+    _tasks.removeWhere((t) => t.id == taskId);
+    await _persist();
+    _emit();
+  }
+
+  @override
   Future<void> reorderActiveTasks(List<String> orderedIds) async {
     for (var i = 0; i < orderedIds.length; i++) {
       final idx = _tasks.indexWhere((t) => t.id == orderedIds[i]);

@@ -7,6 +7,7 @@ import 'package:to_do_list/features/domain/usecases/reorder_active_tasks_usecase
 import 'package:to_do_list/features/domain/usecases/reorder_dependency_tasks_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/update_task_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/watch_task_usecase.dart';
+import 'package:to_do_list/features/domain/usecases/delete_task_usecase.dart';
 import 'package:to_do_list/features/presentation/bloc/task_event.dart';
 import 'package:to_do_list/features/presentation/bloc/task_state.dart';
 
@@ -14,6 +15,7 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
   final WatchTask _watchTasks;
   final AddTask _addTask;
   final UpdateTask _updateTask;
+  final DeleteTask _deleteTask;
   final ReorderActiveTasks _reorderActive;
   final ReorderDependencyTasks _reorderDependencies;
   StreamSubscription<List<TaskEntity>>? _tasksSubscription;
@@ -22,11 +24,13 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
     required WatchTask watchTasks,
     required AddTask addTask,
     required UpdateTask updateTask,
+    required DeleteTask deleteTask,
     required ReorderActiveTasks reorderActive,
     required ReorderDependencyTasks reorderDependencies,
   }) : _watchTasks = watchTasks,
        _addTask = addTask,
        _updateTask = updateTask,
+       _deleteTask = deleteTask,
        _reorderActive = reorderActive,
        _reorderDependencies = reorderDependencies,
        super(const TaskListState()) {
@@ -35,6 +39,7 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
     on<ToggleSection>(_onToggleSection);
     on<CreateTaskRequested>(_onCreateTaskRequested);
     on<UpdateTaskRequested>(_onUpdateTaskRequested);
+    on<DeleteTaskRequested>(_onDeleteTaskRequested);
     on<ReorderActiveTasksRequested>(_onReorderActiveTasksRequested);
     on<ReorderDependencyTasksRequested>(_onReorderDependencyTasksRequested);
   }
@@ -74,6 +79,20 @@ class TaskListBloc extends Bloc<TaskListEvent, TaskListState> {
   ) async {
     try {
       await _updateTask(event.task);
+    } catch (_) {
+      emit(state.copyWith(status: TaskListStatus.failure));
+    }
+  }
+
+  Future<void> _onDeleteTaskRequested(
+    DeleteTaskRequested event,
+    Emitter<TaskListState> emit,
+  ) async {
+    emit(state.copyWith(status: TaskListStatus.loading));
+
+    try {
+      await _deleteTask(event.taskId);
+      emit(state.copyWith(status: TaskListStatus.success));
     } catch (_) {
       emit(state.copyWith(status: TaskListStatus.failure));
     }

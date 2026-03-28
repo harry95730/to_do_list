@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:to_do_list/features/data/repositories/persisting_to_do_repository.dart';
 import 'package:to_do_list/features/domain/usecases/add_task_usecase.dart';
+import 'package:to_do_list/features/domain/usecases/delete_task_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/reorder_active_tasks_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/reorder_dependency_tasks_usecase.dart';
 import 'package:to_do_list/features/domain/usecases/update_task_usecase.dart';
@@ -30,6 +31,7 @@ class MyApp extends StatelessWidget {
         watchTasks: WatchTask(repository),
         addTask: AddTask(repository),
         updateTask: UpdateTask(repository),
+        deleteTask: DeleteTask(repository),
         reorderActive: ReorderActiveTasks(repository),
         reorderDependencies: ReorderDependencyTasks(repository),
       )..add(WatchTasksStarted()),
